@@ -345,11 +345,14 @@ export class ProcessingHelper {
 
           console.log("Problem info:", problemInfo);
 
+          // splitting the response text on "\n"
+          const thoughtsSplitted = responseText.split("\n");
+
           const formattedResponse = {
             code: responseText,
             thoughts:
-              responseText && responseText.length > 0
-                ? ["Solution approach based on efficiency and readability"]
+              thoughtsSplitted && thoughtsSplitted.length > 0
+                ? thoughtsSplitted
                 : "No solution provided",
             time_complexity: "N/A",
             space_complexity: "N/A",
