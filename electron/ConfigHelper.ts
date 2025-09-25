@@ -18,7 +18,7 @@ interface Config {
 export class ConfigHelper extends EventEmitter {
   private configPath: string;
   private defaultConfig: Config = {
-    apiKey: "",
+    apiKey: process.env.OPENAI_API_KEY,
     apiProvider: "openai", // Default to Gemini
     extractionModel: "gpt-5", // Default to Flash for faster responses
     solutionModel: "gpt-5",
@@ -55,83 +55,11 @@ export class ConfigHelper extends EventEmitter {
     }
   }
 
-  /**
-   * Validate and sanitize model selection to ensure only allowed models are used
-   */
-  private sanitizeModelSelection(model: string, provider: "openai"): string {
-    if (provider === "openai") {
-      // Only allow gpt-4o and gpt-4o-mini for OpenAI
-      const allowedModels = ["gpt-4o", "gpt-4o-mini", "gpt-5"];
-      if (!allowedModels.includes(model)) {
-        console.warn(
-          `Invalid OpenAI model specified: ${model}. Using default model: gpt-5`
-        );
-        return "gpt-5";
-      }
-      return model;
-    } else if (provider === "gemini") {
-      // Only allow gemini-1.5-pro and gemini-2.0-flash for Gemini
-      const allowedModels = ["gemini-1.5-pro", "gemini-2.0-flash"];
-      if (!allowedModels.includes(model)) {
-        console.warn(
-          `Invalid Gemini model specified: ${model}. Using default model: gemini-2.0-flash`
-        );
-        return "gemini-2.0-flash"; // Changed default to flash
-      }
-      return model;
-    } else if (provider === "anthropic") {
-      // Only allow Claude models
-      const allowedModels = [
-        "claude-3-7-sonnet-20250219",
-        "claude-3-5-sonnet-20241022",
-        "claude-3-opus-20240229",
-      ];
-      if (!allowedModels.includes(model)) {
-        console.warn(
-          `Invalid Anthropic model specified: ${model}. Using default model: claude-3-7-sonnet-20250219`
-        );
-        return "claude-3-7-sonnet-20250219";
-      }
-      return model;
-    }
-    // Default fallback
-    return model;
-  }
-
   public loadConfig(): Config {
     try {
       if (fs.existsSync(this.configPath)) {
         const configData = fs.readFileSync(this.configPath, "utf8");
         const config = JSON.parse(configData);
-
-        // Ensure apiProvider is a valid value
-        if (
-          config.apiProvider !== "openai" &&
-          config.apiProvider !== "gemini" &&
-          config.apiProvider !== "anthropic"
-        ) {
-          config.apiProvider = "gemini"; // Default to Gemini if invalid
-        }
-
-        // Sanitize model selections to ensure only allowed models are used
-        if (config.extractionModel) {
-          config.extractionModel = this.sanitizeModelSelection(
-            config.extractionModel,
-            config.apiProvider
-          );
-        }
-        if (config.solutionModel) {
-          config.solutionModel = this.sanitizeModelSelection(
-            config.solutionModel,
-            config.apiProvider
-          );
-        }
-        if (config.debuggingModel) {
-          config.debuggingModel = this.sanitizeModelSelection(
-            config.debuggingModel,
-            config.apiProvider
-          );
-        }
 
         return {
           ...this.defaultConfig,
@@ -195,26 +123,6 @@ export class ConfigHelper extends EventEmitter {
           updates.solutionModel = "gpt-5";
           updates.debuggingModel = "gpt-5";
         }
-      }
-
-      // Sanitize model selections in the updates
-      if (updates.extractionModel) {
-        updates.extractionModel = this.sanitizeModelSelection(
-          updates.extractionModel,
-          provider
-        );
-      }
-      if (updates.solutionModel) {
-        updates.solutionModel = this.sanitizeModelSelection(
-          updates.solutionModel,
-          provider
-        );
-      }
-      if (updates.debuggingModel) {
-        updates.debuggingModel = this.sanitizeModelSelection(
-          updates.debuggingModel,
-          provider
-        );
       }
 
       const newConfig = { ...currentConfig, ...updates };
