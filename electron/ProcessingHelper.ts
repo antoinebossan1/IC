@@ -15,10 +15,12 @@ export class ProcessingHelper {
   // AbortControllers for API requests
   private currentProcessingAbortController: AbortController | null = null;
   private currentExtraProcessingAbortController: AbortController | null = null;
+  private generalQuestionHelper: GeneralQuestionHelper;
 
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps;
     this.screenshotHelper = deps.getScreenshotHelper();
+    this.generalQuestionHelper = new GeneralQuestionHelper(deps);
 
     // Initialize AI client based on config
     this.initializeAIClient();
@@ -50,6 +52,24 @@ export class ProcessingHelper {
     } catch (error) {
       console.error("Failed to initialize AI client:", error);
       this.openaiClient = null;
+    }
+  }
+
+  public async processGeneralQuestion(): Promise<boolean> {
+    const mainWindow = this.deps.getMainWindow();
+    if (!mainWindow) return;
+    const result = await this.generalQuestionHelper.processGeneralQuestion();
+    if (result) {
+      this.deps.setHasDebugged(true);
+      mainWindow.webContents.send(
+        this.deps.PROCESSING_EVENTS.DEBUG_SUCCESS,
+        result.data
+      );
+    } else {
+      mainWindow.webContents.send(
+        this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
+        result.error
+      );
     }
   }
 
@@ -105,10 +125,6 @@ export class ProcessingHelper {
       console.error("Error getting language:", error);
       return "python";
     }
-  }
-
-  public async processGeneralQuestion(): Promise<void> {
-    await GeneralQuestionHelper();
   }
 
   public async processScreenshots(): Promise<void> {
