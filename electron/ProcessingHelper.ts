@@ -6,6 +6,7 @@ import * as axios from "axios";
 import { BrowserWindow } from "electron";
 import { OpenAI } from "openai";
 import { configHelper } from "./ConfigHelper";
+import { GeneralQuestionHelper } from "./GeneralQuestionHelper";
 
 export class ProcessingHelper {
   private deps: IProcessingHelperDeps;
@@ -104,6 +105,10 @@ export class ProcessingHelper {
       console.error("Error getting language:", error);
       return "python";
     }
+  }
+
+  public async processGeneralQuestion(): Promise<void> {
+    await GeneralQuestionHelper();
   }
 
   public async processScreenshots(): Promise<void> {
