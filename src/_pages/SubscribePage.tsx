@@ -1,57 +1,57 @@
-import { useState, useRef, useEffect } from "react"
-import { supabase } from "../lib/supabase"
-import { User } from "@supabase/supabase-js"
+import { useState, useRef, useEffect } from "react";
+import { supabase } from "../lib/supabase";
+import { User } from "@supabase/supabase-js";
 
 interface SubscribePageProps {
-  user: User
+  user: User;
 }
 
 export default function SubscribePage({ user }: SubscribePageProps) {
-  const [error, setError] = useState<string | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const updateDimensions = () => {
       if (containerRef.current) {
         window.electronAPI.updateContentDimensions({
           width: 400, // Fixed width
-          height: 400 // Fixed height
-        })
+          height: 400, // Fixed height
+        });
       }
-    }
+    };
 
-    updateDimensions()
-  }, [])
+    updateDimensions();
+  }, []);
 
   const handleSignOut = async () => {
     try {
-      const { error: signOutError } = await supabase.auth.signOut()
-      if (signOutError) throw signOutError
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) throw signOutError;
     } catch (err) {
-      console.error("Error signing out:", err)
-      setError("Failed to sign out. Please try again.")
-      setTimeout(() => setError(null), 3000)
+      console.error("Error signing out:", err);
+      setError("Failed to sign out. Please try again.");
+      setTimeout(() => setError(null), 3000);
     }
-  }
+  };
 
   const handleSubscribe = async () => {
-    if (!user) return
+    if (!user) return;
 
     try {
       const result = await window.electronAPI.openSubscriptionPortal({
         id: user.id,
-        email: user.email!
-      })
+        email: user.email!,
+      });
 
       if (!result.success) {
-        throw new Error(result.error || "Failed to open subscription portal")
+        throw new Error(result.error || "Failed to open subscription portal");
       }
     } catch (err) {
-      console.error("Error opening subscription portal:", err)
-      setError("Failed to open subscription portal. Please try again.")
-      setTimeout(() => setError(null), 3000)
+      console.error("Error opening subscription portal:", err);
+      setError("Failed to open subscription portal. Please try again.");
+      setTimeout(() => setError(null), 3000);
     }
-  }
+  };
 
   return (
     <div
@@ -60,18 +60,6 @@ export default function SubscribePage({ user }: SubscribePageProps) {
     >
       <div className="w-full px-6">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-white">
-            Welcome to Interview Coder
-          </h2>
-          <p className="text-gray-400 text-sm mt-2 mb-6">
-            To continue using Interview Coder, you'll need to subscribe
-            ($60/month)
-          </p>
-          <p className="text-gray-500 text-[11px] -mt-4 mb-6 italic">
-            * Undetectability may not work with some versions of MacOS. See our
-            help center for more details
-          </p>
-
           {/* Keyboard Shortcuts */}
           <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 mb-6">
             <div className="flex items-center justify-between text-white/70 text-xs">
@@ -99,29 +87,6 @@ export default function SubscribePage({ user }: SubscribePageProps) {
               </div>
             </div>
           </div>
-
-          {/* Subscribe Button */}
-          <button
-            onClick={handleSubscribe}
-            className="w-full px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-white/90 transition-colors flex items-center justify-center gap-2 mb-6"
-          >
-            Subscribe
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-          </button>
 
           {/* Logout Section */}
           <div className="border-t border-white/[0.06] pt-4">
@@ -157,5 +122,5 @@ export default function SubscribePage({ user }: SubscribePageProps) {
         </div>
       </div>
     </div>
-  )
+  );
 }
