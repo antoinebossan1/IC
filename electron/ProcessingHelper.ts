@@ -6,7 +6,6 @@ import * as axios from "axios";
 import { BrowserWindow } from "electron";
 import { OpenAI } from "openai";
 import { configHelper } from "./ConfigHelper";
-import { GeneralQuestionHelper } from "./GeneralQuestionHelper";
 
 export class ProcessingHelper {
   private deps: IProcessingHelperDeps;
@@ -15,12 +14,10 @@ export class ProcessingHelper {
   // AbortControllers for API requests
   private currentProcessingAbortController: AbortController | null = null;
   private currentExtraProcessingAbortController: AbortController | null = null;
-  private generalQuestionHelper: GeneralQuestionHelper;
 
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps;
     this.screenshotHelper = deps.getScreenshotHelper();
-    this.generalQuestionHelper = new GeneralQuestionHelper(deps);
 
     // Initialize AI client based on config
     this.initializeAIClient();
@@ -55,21 +52,343 @@ export class ProcessingHelper {
     }
   }
 
-  public async processGeneralQuestion(): Promise<boolean> {
+  public async processGeneralQuestion(): Promise<void> {
     const mainWindow = this.deps.getMainWindow();
     if (!mainWindow) return;
-    const result = await this.generalQuestionHelper.processGeneralQuestion();
-    if (result) {
-      this.deps.setHasDebugged(true);
-      mainWindow.webContents.send(
-        this.deps.PROCESSING_EVENTS.DEBUG_SUCCESS,
-        result.data
+
+    const view = this.deps.getView();
+    console.log("Processing screenshots in view:", view);
+
+    if (view === "queue") {
+      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START);
+      const screenshotQueue = this.screenshotHelper.getScreenshotQueue();
+      console.log("Processing main queue screenshots:", screenshotQueue);
+
+      // Check if the queue is empty
+      if (!screenshotQueue || screenshotQueue.length === 0) {
+        console.log("No screenshots found in queue");
+        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
+        return;
+      }
+
+      // Check that files actually exist
+      const existingScreenshots = screenshotQueue.filter((path) =>
+        fs.existsSync(path)
       );
+      if (existingScreenshots.length === 0) {
+        console.log("Screenshot files don't exist on disk");
+        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
+        return;
+      }
+
+      try {
+        // Initialize AbortController
+        this.currentProcessingAbortController = new AbortController();
+        const { signal } = this.currentProcessingAbortController;
+
+        const screenshots = await Promise.all(
+          existingScreenshots.map(async (path) => {
+            try {
+              return {
+                path,
+                preview: await this.screenshotHelper.getImagePreview(path),
+                data: fs.readFileSync(path).toString("base64"),
+              };
+            } catch (err) {
+              console.error(`Error reading screenshot ${path}:`, err);
+              return null;
+            }
+          })
+        );
+
+        // Filter out any nulls from failed screenshots
+        const validScreenshots = screenshots.filter(Boolean);
+
+        if (validScreenshots.length === 0) {
+          throw new Error("Failed to load screenshot data");
+        }
+
+        const result = await this.processGeneralQuestionsHelper(
+          validScreenshots,
+          signal
+        );
+
+        console.log("DEBUG in Processing Helper", result);
+
+        if (!result.success) {
+          console.log("Processing failed:", result.error);
+          if (
+            result.error?.includes("API Key") ||
+            result.error?.includes("OpenAI") ||
+            result.error?.includes("Gemini")
+          ) {
+            mainWindow.webContents.send(
+              this.deps.PROCESSING_EVENTS.API_KEY_INVALID
+            );
+          } else {
+            mainWindow.webContents.send(
+              this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+              result.error
+            );
+          }
+          // Reset view back to queue on error
+          console.log("Resetting view to queue due to error");
+          this.deps.setView("queue");
+          return;
+        }
+
+        // Only set view to solutions if processing succeeded
+        console.log("Setting view to solutions after successful processing");
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
+          result.data
+        );
+        this.deps.setView("solutions");
+      } catch (error: any) {
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+          error
+        );
+        console.error("Processing error:", error);
+        if (axios.isCancel(error)) {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+            "Processing was canceled by the user."
+          );
+        } else {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+            error.message || "Server error. Please try again."
+          );
+        }
+        // Reset view back to queue on error
+        console.log("Resetting view to queue due to error");
+        this.deps.setView("queue");
+      } finally {
+        this.currentProcessingAbortController = null;
+      }
     } else {
-      mainWindow.webContents.send(
-        this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
-        result.error
+      // view == 'solutions'
+      const extraScreenshotQueue =
+        this.screenshotHelper.getExtraScreenshotQueue();
+      console.log("Processing extra queue screenshots:", extraScreenshotQueue);
+
+      // Check if the extra queue is empty
+      if (!extraScreenshotQueue || extraScreenshotQueue.length === 0) {
+        console.log("No extra screenshots found in queue");
+        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
+        return;
+      }
+
+      // Check that files actually exist
+      const existingExtraScreenshots = extraScreenshotQueue.filter((path) =>
+        fs.existsSync(path)
       );
+      if (existingExtraScreenshots.length === 0) {
+        console.log("Extra screenshot files don't exist on disk");
+        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
+        return;
+      }
+
+      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.DEBUG_START);
+
+      // Initialize AbortController
+      this.currentExtraProcessingAbortController = new AbortController();
+      const { signal } = this.currentExtraProcessingAbortController;
+
+      try {
+        // Get all screenshots (both main and extra) for processing
+        const allPaths = [
+          ...this.screenshotHelper.getScreenshotQueue(),
+          ...existingExtraScreenshots,
+        ];
+
+        const screenshots = await Promise.all(
+          allPaths.map(async (path) => {
+            try {
+              if (!fs.existsSync(path)) {
+                console.warn(`Screenshot file does not exist: ${path}`);
+                return null;
+              }
+
+              return {
+                path,
+                preview: await this.screenshotHelper.getImagePreview(path),
+                data: fs.readFileSync(path).toString("base64"),
+              };
+            } catch (err) {
+              console.error(`Error reading screenshot ${path}:`, err);
+              return null;
+            }
+          })
+        );
+
+        // Filter out any nulls from failed screenshots
+        const validScreenshots = screenshots.filter(Boolean);
+
+        if (validScreenshots.length === 0) {
+          throw new Error("Failed to load screenshot data for debugging");
+        }
+
+        console.log(
+          "Combined screenshots for processing:",
+          validScreenshots.map((s) => s!.path)
+        );
+
+        const result = await this.processGeneralQuestionsHelper(
+          validScreenshots as Array<{ path: string; data: string }>,
+          signal
+        );
+
+        console.log("result in processing helper", result);
+        console.log("result data in processing helper", result.data);
+
+        // Only set view to solutions if processing succeeded
+        console.log("Setting view to solutions after successful processing");
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
+          result.data
+        );
+      } catch (error: any) {
+        if (axios.isCancel(error)) {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
+            "Extra processing was canceled by the user."
+          );
+        } else {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
+            error.message
+          );
+        }
+      } finally {
+        this.currentExtraProcessingAbortController = null;
+      }
+    }
+  }
+
+  private async processGeneralQuestionsHelper(
+    screenshots: Array<{ path: string; data: string }>,
+    signal: AbortSignal
+  ) {
+    try {
+      const config = configHelper.loadConfig();
+      const language = await this.getLanguage();
+      const mainWindow = this.deps.getMainWindow();
+
+      // Step 1: Extract problem info using AI Vision API (OpenAI or Gemini)
+      const imageDataList = screenshots.map((screenshot) => screenshot.data);
+
+      // Update the user on progress
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "Analyzing problem from screenshots...",
+          progress: 20,
+        });
+      }
+
+      let problemInfo;
+
+      if (config.apiProvider === "openai") {
+        // Verify OpenAI client
+        if (!this.openaiClient) {
+          this.initializeAIClient(); // Try to reinitialize
+
+          if (!this.openaiClient) {
+            return {
+              success: false,
+              error:
+                "OpenAI API key not configured or invalid. Please check your settings.",
+            };
+          }
+        }
+
+        // Use OpenAI for processing
+        const messages = [
+          {
+            role: "system" as const,
+            content:
+              "You are a technical assistant. Analyze the screenshot of the technical question and extract all relevant information. Return the information in JSON format with these fields: problem_statement, solution. Just return the structured JSON without any other text.",
+          },
+          {
+            role: "user" as const,
+            content: [
+              {
+                type: "text" as const,
+                text: `Extract the technical question details from these screenshots and answer it. Return in JSON format.`,
+              },
+              ...imageDataList.map((data) => ({
+                type: "image_url" as const,
+                image_url: { url: `data:image/png;base64,${data}` },
+              })),
+            ],
+          },
+        ];
+
+        // Send to OpenAI Vision API
+        const extractionResponse =
+          await this.openaiClient.chat.completions.create({
+            model: config.extractionModel || "gpt-4o",
+            messages: messages,
+            max_tokens: 4000,
+            temperature: 0.2,
+          });
+
+        // Parse the response
+        try {
+          const responseText = extractionResponse.choices[0].message.content;
+          // Handle when OpenAI might wrap the JSON in markdown code blocks
+          const jsonText = responseText?.replace(/```json|```/g, "").trim();
+          problemInfo = JSON.parse(jsonText || "{}");
+
+          console.log("Response text:", responseText);
+
+          console.log("Problem info:", problemInfo);
+
+          const formattedResponse = {
+            code: responseText,
+            thoughts:
+              responseText && responseText.length > 0
+                ? ["Solution approach based on efficiency and readability"]
+                : "No solution provided",
+            time_complexity: "N/A",
+            space_complexity: "N/A",
+          };
+
+          return {
+            success: true,
+            data: formattedResponse,
+          };
+        } catch (error) {
+          console.error("Error parsing OpenAI response:", error);
+          return {
+            success: false,
+            error:
+              "Failed to parse problem information. Please try again or use clearer screenshots.",
+          };
+        }
+      }
+
+      // Update the user on progress
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message:
+            "Problem analyzed successfully. Preparing to generate solution...",
+          progress: 40,
+        });
+      }
+
+      // If we get here without returning, something went wrong
+      return {
+        success: false,
+        error: "No supported API provider configured",
+      };
+    } catch (error: any) {
+      console.error("Error in processGeneralQuestionsHelper:", error);
+      return {
+        success: false,
+        error: error.message || "Unknown error occurred",
+      };
     }
   }
 
